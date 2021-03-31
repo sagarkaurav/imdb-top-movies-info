@@ -1,0 +1,97 @@
+#! /usr/bin/env python3
+
+import requests
+import concurrent.futures
+import sys
+from lxml import html
+
+def get_html_content_tree(url):
+    """
+    get_html_content_tree function takes http url and return `lxml` html tree
+    url: http url
+    """
+    page = requests.get(url)
+    return html.fromstring(page.content)
+
+def get_movie_detail(movie_id):
+    # fetch the specific movie detail page give by the movie id
+    movie_page_tree = get_html_content_tree('https://imdb.com/title/{}'.format(movie_id))
+    movie_detail = movie_page_tree.xpath('//div[@class="title_wrapper"]')[0]
+    return {
+        'id': movie_id,
+        'summary': movie_page_tree.xpath("//div[@class='summary_text']")[0].text.strip(),
+        'duration': movie_detail.xpath('.//time')[0].text.strip(),
+        'genre':  movie_detail.xpath('.//a')[1].text.strip()
+    }
+
+# only allow to fetch data from these urls
+VALID_CHART_URLS = [
+    'https://www.imdb.com/india/top-rated-indian-movies',
+    'https://www.imdb.com/india/top-rated-tamil-movies',
+    'https://www.imdb.com/india/top-rated-telugu-movies'
+]
+
+# check if all the required agruments are required
+if len(sys.argv) < 3:
+    print("invalid number of arguments")
+    print(sys.argv[0], "[chart_url]", "[items_count]")
+    exit(1)
+
+chart_url = sys.argv[1].strip()
+if chart_url not in VALID_CHART_URLS:
+    print("invalid chart_url. Please use one of the following url as agrument")
+    print(VALID_CHART_URLS)
+    exit(1)
+
+
+try:
+    items_count = int(sys.argv[2].strip())
+except ValueError:
+    print("Please provide items_count as number")
+    exit(1)
+
+final_output = {}
+movies_page_tree = get_html_content_tree(chart_url)
+
+# get the tbody which contains list of all the movies
+movies_info = movies_page_tree.xpath('//tbody[@class="lister-list"]/tr')
+
+# loop through all the movies and fetch the data for each movie
+for index, mi in enumerate(movies_info):
+
+    # stop fetching data required amount of data 
+    if index == items_count:
+        break
+
+    # fetch the a tage contains movie name as well as the link to perticular movive page
+    title_link_tag = mi.xpath('.//td[@class="titleColumn"]/a')[0]
+
+    released_year =  mi.xpath('.//td[@class="titleColumn"]/span[@class="secondaryInfo"]')[0].text.strip()
+
+    # remove '(' and ')' from the release year and convert it to int
+    released_year = int(released_year.replace('(', '').replace(')', ''))
+    movie_output = {
+        'title': title_link_tag.text.strip(),
+        'released_year': released_year,
+        'imdb_rating': float(mi.xpath('.//td[@class="ratingColumn imdbRating"]/strong')[0].text.strip()),
+    }
+    # fetch the movie id from the link for future use.
+    movie_id = title_link_tag.get('href').split('/')[2].strip()
+
+    # append whole movie details into the final output array
+    final_output[movie_id] = movie_output
+
+# fetch remening information for movie in thread pool to speed up the fetch proccess
+# if user asks for 5 movies we have to visit five pages. Instead of visting all the pages one by one
+# we are using thread to make process faster
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    movie_details_threads = [executor.submit(get_movie_detail, movie_id)  for movie_id in final_output.keys()]
+    
+    for mdt in concurrent.futures.as_completed(movie_details_threads):
+        md  = mdt.result()
+        movie_id = md['id']
+        md.pop('id')
+        final_output[movie_id].update(md)
+
+
+print(list(final_output.values()))
