@@ -11,3 +11,6 @@
 # How to use script
 1. `./imdb_chart_fetcher [chart_url] [items_count]`
  >> The script will look for `python3` in your machine
+
+ # Example
+`./imdb_chart_fecther https://www.imdb.com/india/top-rated-telugu-movies 5`
